@@ -41,10 +41,17 @@ ADMIN_COLOR = (0, 215, 255)
 UNKNOWN_COLOR = (0, 165, 195)
 HUD_ALPHA = 0.55
 
-# Corner brackets
+# Corner brackets (screen decoration)
 BRACKET_ARM = 24
 BRACKET_WEIGHT = 2
 BRACKET_MARGIN = 28
+
+# Face box style (segmented: solid corners + dashed edges)
+CORNER_LEN = 20                      # Length of each solid corner arm (px)
+DASH_LEN = 8                         # Dash segment length (px)
+GAP_LEN = 8                          # Gap between dashes (px)
+DASH_COLOR = (0, 100, 150)           # Dark yellow for dashed edges (BGR)
+BOX_WEIGHT = 2                       # Line thickness for face boxes
 
 # Typography
 FONT = cv2.FONT_HERSHEY_SIMPLEX
@@ -239,6 +246,56 @@ def update_tracker(detected_boxes, frame_no):
 # HUD RENDERING
 # ============================================================================
 
+def _draw_dashed_line(img, pt1, pt2, color, thickness, dash_len, gap_len):
+    """Draw a dashed line from *pt1* to *pt2* by painting short segments."""
+    x1, y1 = pt1
+    x2, y2 = pt2
+    total = int(((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5)
+    if total == 0:
+        return
+    dx = (x2 - x1) / total
+    dy = (y2 - y1) / total
+    step = dash_len + gap_len
+    pos = 0
+    while pos < total:
+        end = min(pos + dash_len, total)
+        cv2.line(img,
+                 (int(x1 + dx * pos), int(y1 + dy * pos)),
+                 (int(x1 + dx * end), int(y1 + dy * end)),
+                 color, thickness, cv2.LINE_4)
+        pos += step
+
+
+def _draw_segmented_box(frame, left, top, right, bottom):
+    """Draw a single segmented face box: solid L corners + dashed edges."""
+    l, t, r, b = left, top, right, bottom
+    cl = CORNER_LEN
+
+    # --- solid L-shaped corners (HUD_COLOR) ---
+    # Top-left
+    cv2.line(frame, (l, t), (l, t + cl), HUD_COLOR, BOX_WEIGHT)
+    cv2.line(frame, (l, t), (l + cl, t), HUD_COLOR, BOX_WEIGHT)
+    # Top-right
+    cv2.line(frame, (r - cl, t), (r, t), HUD_COLOR, BOX_WEIGHT)
+    cv2.line(frame, (r, t), (r, t + cl), HUD_COLOR, BOX_WEIGHT)
+    # Bottom-right
+    cv2.line(frame, (r, b - cl), (r, b), HUD_COLOR, BOX_WEIGHT)
+    cv2.line(frame, (r - cl, b), (r, b), HUD_COLOR, BOX_WEIGHT)
+    # Bottom-left
+    cv2.line(frame, (l, b - cl), (l, b), HUD_COLOR, BOX_WEIGHT)
+    cv2.line(frame, (l, b), (l + cl, b), HUD_COLOR, BOX_WEIGHT)
+
+    # --- dashed edges (DASH_COLOR) ---
+    _draw_dashed_line(frame, (l + cl, t), (r - cl, t),
+                      DASH_COLOR, BOX_WEIGHT, DASH_LEN, GAP_LEN)           # top
+    _draw_dashed_line(frame, (r, t + cl), (r, b - cl),
+                      DASH_COLOR, BOX_WEIGHT, DASH_LEN, GAP_LEN)           # right
+    _draw_dashed_line(frame, (r - cl, b), (l + cl, b),
+                      DASH_COLOR, BOX_WEIGHT, DASH_LEN, GAP_LEN)           # bottom
+    _draw_dashed_line(frame, (l, b - cl), (l, t + cl),
+                      DASH_COLOR, BOX_WEIGHT, DASH_LEN, GAP_LEN)           # left
+
+
 def _draw_label(frame, text, x, y, colour):
     """Black-background pill with yellow text."""
     (tw, th), _ = cv2.getTextSize(text, FONT, LABEL_SCALE, LABEL_WEIGHT)
@@ -285,7 +342,7 @@ def draw_hud(frame, tracked_faces):
         t, r, b, l = data["box"]
         name = data.get("name", "UNKNOWN")
         colour = ADMIN_COLOR if name == "ADMIN" else UNKNOWN_COLOR
-        cv2.rectangle(frame, (l, t), (r, b), colour, 2)
+        _draw_segmented_box(frame, l, t, r, b)
 
         label_x = l
         label_y = t - 6
