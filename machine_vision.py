@@ -53,6 +53,8 @@ DASH_LEN = 8                         # Dash segment length (px)
 GAP_LEN = 8                          # Gap between dashes (px)
 DASH_COLOR = (0, 0, 0)               # Black for dashed edges
 BOX_WEIGHT = 2                       # Line thickness for face boxes
+BOX_SCALE = 1.20                     # Scale face boxes (1.0 = exact, >1 = larger)
+BOX_OFFSET_Y = -15                   # Vertical shift in px (negative = up)
 
 # Typography
 FONT = cv2.FONT_HERSHEY_SIMPLEX
@@ -116,16 +118,24 @@ def load_known_faces(directory):
 def detect_faces(rgb_small, scale):
     """
     Run face_recognition face_locations on a down-scaled RGB image.
-    Returns a list of (top, right, bottom, left) boxes in original coords.
+    Returns a list of (top, right, bottom, left) boxes in original coords,
+    with BOX_SCALE and BOX_OFFSET_Y applied.
     """
     locations_small = face_recognition.face_locations(rgb_small, model="hog")
     boxes = []
-    for t, r, b, l in locations_small:
+    for t_s, r_s, b_s, l_s in locations_small:
+        t = int(t_s / scale)
+        r = int(r_s / scale)
+        b = int(b_s / scale)
+        l = int(l_s / scale)
+        # Expand from centre
+        cw = (r - l) * (BOX_SCALE - 1.0) / 2.0
+        ch = (b - t) * (BOX_SCALE - 1.0) / 2.0
         boxes.append((
-            int(t / scale),
-            int(r / scale),
-            int(b / scale),
-            int(l / scale),
+            int(t - ch + BOX_OFFSET_Y),
+            int(r + cw),
+            int(b + ch + BOX_OFFSET_Y),
+            int(l - cw),
         ))
     return boxes
 
