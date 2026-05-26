@@ -1,20 +1,18 @@
 """
 machine_vision.py — Person of Interest "The Machine" HUD Simulator
 
-Dual-engine architecture:
-  - MediaPipe FaceDetection  →  fast bounding-box detection every frame
-  - face_recognition         →  identity confirmation on-demand only
-    (triggered when a new face appears, or every RECOGNITION_INTERVAL frames)
+Real-time face detection + identification with POI-style HUD overlay.
+Detection runs on a down-scaled frame for speed; recognition is throttled
+per tracked face (every N frames or when a new face appears).
 
 Usage:
-    pip install face_recognition opencv-python numpy Pillow mediapipe
+    pip install face_recognition opencv-python numpy Pillow
     python machine_vision.py
 """
 
 import cv2
 import numpy as np
 import face_recognition
-import mediapipe as mp
 from datetime import datetime
 import os
 import sys
@@ -27,6 +25,7 @@ import time
 KNOWN_FACES_DIR = "known_faces"
 TOLERANCE = 0.5                       # Face match tolerance (0 = strict, 1 = loose)
 RECOGNITION_INTERVAL = 30             # Re-confirm identity every N frames per tracked face
+PROCESS_SCALE = 0.25                  # Downscale factor for detection (0.25 = 1/4 size)
 LERP_FACTOR = 0.15                    # Box position smoothing (0 = frozen, 1 = instant)
 CAMERA_INDEX = 0
 MIRROR_MODE = True
@@ -36,11 +35,7 @@ CAMERA_WIDTH = 1280                   # Native capture resolution
 CAMERA_HEIGHT = 720
 WARMUP_FRAMES = 30                    # Discard N frames while AE / AWB / AF settle
 
-# MediaPipe
-MP_DETECTION_CONFIDENCE = 0.6
-MP_MODEL_SELECTION = 0                # 0 = short-range (< 2 m), 1 = long-range
-
-# HUD palette  (BGR byte order — #FFD700 = (0, 215, 255))
+# HUD palette  (BGR byte order -- #FFD700 = (0, 215, 255))
 HUD_COLOR = (0, 215, 255)
 ADMIN_COLOR = (0, 215, 255)
 UNKNOWN_COLOR = (0, 165, 195)
@@ -66,9 +61,8 @@ TRACK_TTL = 5                         # Drop stale tracks after N missed frames
 # ============================================================================
 
 _known_encodings = None
-_tracked_faces = {}                   # face_id → {box, name, age, last_rec_frame, needs_recognition}
+_tracked_faces = {}                   # face_id -> {box, name, age, last_rec_frame, needs_recognition}
 _next_face_id = 0
-_mp_face_detection = None
 
 # ============================================================================
 # FACE DATABASE  (load once at startup)
@@ -98,7 +92,7 @@ def load_known_faces(directory):
             encodings.append(encs[0])
             print(f"  [OK]   {fn}")
         else:
-            print(f"  [SKIP] {fn}  — no face detected")
+            print(f"  [SKIP] {fn}  -- no face detected")
 
     if not encodings:
         print("[ERROR]  No faces found in any of the provided images.")
@@ -108,35 +102,34 @@ def load_known_faces(directory):
     _known_encodings = encodings
 
 # ============================================================================
-# DETECTION  (MediaPipe — fast, runs every frame)
+# DETECTION  (face_recognition HOG on down-scaled frame -- fast enough for CPU)
 # ============================================================================
 
-def detect_faces_mediapipe(rgb_frame):
+def detect_faces(rgb_small, scale):
     """
-    Run MediaPipe FaceDetection on *rgb_frame*.
-    Returns a list of (top, right, bottom, left) boxes in pixel coords.
+    Run face_recognition face_locations on a down-scaled RGB image.
+    Returns a list of (top, right, bottom, left) boxes in original coords.
     """
-    h, w = rgb_frame.shape[:2]
-    results = _mp_face_detection.process(rgb_frame)
+    locations_small = face_recognition.face_locations(rgb_small, model="hog")
     boxes = []
-    if results.detections:
-        for det in results.detections:
-            bbox = det.location_data.relative_bounding_box
-            left   = max(0,           int(bbox.xmin * w))
-            top    = max(0,           int(bbox.ymin * h))
-            right  = min(w, int((bbox.xmin + bbox.width)  * w))
-            bottom = min(h, int((bbox.ymin + bbox.height) * h))
-            boxes.append((top, right, bottom, left))
+    for t, r, b, l in locations_small:
+        boxes.append((
+            int(t / scale),
+            int(r / scale),
+            int(b / scale),
+            int(l / scale),
+        ))
     return boxes
 
 # ============================================================================
-# RECOGNITION  (face_recognition — on-demand only)
+# RECOGNITION  (face_recognition -- on-demand only)
 # ============================================================================
 
-def run_recognition_on_faces(rgb_frame, tracked_faces, frame_no):
+def run_recognition_on_faces(rgb_full, tracked_faces, frame_no):
     """
     Call face_recognition on every tracked face whose *needs_recognition*
     flag is set.  Updates 'name' and 'last_rec_frame' in-place.
+    Accepts full-resolution rgb frame for accurate encoding.
     """
     rec_fids = []
     rec_boxes = []
@@ -150,7 +143,7 @@ def run_recognition_on_faces(rgb_frame, tracked_faces, frame_no):
         return
 
     encodings = face_recognition.face_encodings(
-        rgb_frame, known_face_locations=rec_boxes
+        rgb_full, known_face_locations=rec_boxes
     )
     for fid, enc in zip(rec_fids, encodings):
         matches = face_recognition.compare_faces(_known_encodings, enc, tolerance=TOLERANCE)
@@ -207,7 +200,7 @@ def update_tracker(detected_boxes, frame_no):
                 best_j = j
 
         if best_j is not None and best_dist < 80 * 80:
-            # Existing face — lerp box, carry forward identity
+            # Existing face -- lerp box, carry forward identity
             fid = track_items[best_j][0]
             used.add(best_j)
             old = _tracked_faces[fid]
@@ -228,7 +221,7 @@ def update_tracker(detected_boxes, frame_no):
                 "needs_recognition": needs_rec,
             }
         else:
-            # New face — trigger immediate recognition
+            # New face -- trigger immediate recognition
             fid = _next_face_id
             _next_face_id += 1
             new_tracks[fid] = {
@@ -272,7 +265,7 @@ def _draw_corner_brackets(layer):
     # Top-right
     cv2.line(layer, (w - m - a, m), (w - m, m), c, t)
     cv2.line(layer, (w - m, m), (w - m, m + a), c, t)
-    # Bottom-right  — vertical bar extends upward from corner
+    # Bottom-right  -- vertical bar extends upward from corner
     cv2.line(layer, (w - m, h - m - a), (w - m, h - m), c, t)
     cv2.line(layer, (w - m, h - m), (w - m - a, h - m), c, t)
     # Bottom-left
@@ -292,26 +285,22 @@ def draw_hud(frame, tracked_faces):
         t, r, b, l = data["box"]
         name = data.get("name", "UNKNOWN")
         colour = ADMIN_COLOR if name == "ADMIN" else UNKNOWN_COLOR
-
         cv2.rectangle(frame, (l, t), (r, b), colour, 2)
 
         label_x = l
         label_y = t - 6
-        if label_y < 22:               # near top edge -> put label below the box
+        if label_y < 22:
             label_y = b + 22
         _draw_label(frame, name, label_x, label_y, colour)
 
     # --- decorative HUD overlay (semi-transparent) ---
     hud_layer = np.zeros_like(frame)
-
     _draw_corner_brackets(hud_layer)
 
-    # Top-left header
-    cv2.putText(hud_layer, "THE MACHINE — SURVEILLANCE FEED",
+    cv2.putText(hud_layer, "THE MACHINE -- SURVEILLANCE FEED",
                 (BRACKET_MARGIN + BRACKET_ARM + 10, BRACKET_MARGIN + 6),
                 FONT, FONT_SCALE, HUD_COLOR, FONT_WEIGHT)
 
-    # Bottom-right timestamp
     ts = datetime.now().strftime("%Y-%m-%d  %H:%M:%S")
     (tw, th), _ = cv2.getTextSize(ts, FONT, FONT_SCALE, FONT_WEIGHT)
     cv2.putText(hud_layer, ts,
@@ -336,7 +325,6 @@ def open_camera():
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAMERA_HEIGHT)
     cap.set(cv2.CAP_PROP_AUTOFOCUS, 1)
 
-    # Discard frames while auto-exposure, white-balance, and focus settle
     for _ in range(WARMUP_FRAMES):
         cap.read()
 
@@ -347,23 +335,15 @@ def open_camera():
 # ============================================================================
 
 def main():
-    global _tracked_faces, _next_face_id, _mp_face_detection
+    global _tracked_faces, _next_face_id
 
     print("=" * 58)
-    print("  THE  MACHINE  —  Surveillance Interface")
+    print("  THE  MACHINE  --  Surveillance Interface")
     print("  Person of Interest  .  HUD Simulator")
     print("=" * 58)
 
-    # --- init MediaPipe ---
-    print("\n[INIT]  Starting MediaPipe face detection ...")
-    mp_face_detection = mp.solutions.face_detection
-    _mp_face_detection = mp_face_detection.FaceDetection(
-        model_selection=MP_MODEL_SELECTION,
-        min_detection_confidence=MP_DETECTION_CONFIDENCE,
-    )
-
     # --- load known faces ---
-    print("[LOAD]  Scanning known_faces/ ...")
+    print("\n[LOAD]  Scanning known_faces/ ...")
     load_known_faces(KNOWN_FACES_DIR)
 
     # --- camera ---
@@ -389,13 +369,14 @@ def main():
         frame = cv2.resize(frame, (WINDOW_WIDTH, WINDOW_HEIGHT))
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
-        # ---- MediaPipe detection (every frame, fast) ----
-        boxes = detect_faces_mediapipe(rgb)
+        # ---- detection on down-scaled image (fast) ----
+        small = cv2.resize(rgb, (0, 0), fx=PROCESS_SCALE, fy=PROCESS_SCALE)
+        boxes = detect_faces(small, PROCESS_SCALE)
 
         # ---- tracking + lerp smoothing ----
         tracked = update_tracker(boxes, frame_no)
 
-        # ---- on-demand face_recognition ----
+        # ---- on-demand recognition (full-res for accuracy) ----
         run_recognition_on_faces(rgb, tracked, frame_no)
 
         # ---- render HUD ----
