@@ -29,7 +29,7 @@ PROCESS_SCALE = 0.25                  # Downscale factor for detection (0.25 = 1
 LERP_FACTOR = 0.15                    # Box position smoothing (0 = frozen, 1 = instant)
 CAMERA_INDEX = 0
 MIRROR_MODE = True
-WINDOW_WIDTH = 1280
+WINDOW_WIDTH = 720
 WINDOW_HEIGHT = 720
 CAMERA_WIDTH = 1280                   # Native capture resolution
 CAMERA_HEIGHT = 720
@@ -422,6 +422,55 @@ def open_camera():
     return cap
 
 # ============================================================================
+# ONE-SHOT IDENTITY CHECK  (for external callers, e.g. Daily companion)
+# ============================================================================
+
+def quick_identity_check(known_faces_dir: str | None = None,
+                         camera_index: int = 0,
+                         capture_warmup: int = 15) -> bool:
+    """Open camera, take a frame, check if ADMIN is visible. Returns True/False."""
+    directory = known_faces_dir or KNOWN_FACES_DIR
+
+    # ensure known faces are loaded
+    global _known_encodings
+    if _known_encodings is None:
+        if not os.path.isdir(directory):
+            return False
+        load_known_faces(directory)
+
+    # open camera
+    cap = cv2.VideoCapture(camera_index)
+    if not cap.isOpened():
+        return False
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, CAMERA_WIDTH)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAMERA_HEIGHT)
+
+    try:
+        for _ in range(capture_warmup):
+            cap.read()
+
+        ok, frame = cap.read()
+        if not ok:
+            return False
+
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        small = cv2.resize(rgb, (0, 0), fx=PROCESS_SCALE, fy=PROCESS_SCALE)
+        boxes = detect_faces(small, PROCESS_SCALE)
+
+        if not boxes:
+            return False
+
+        encodings = face_recognition.face_encodings(rgb, known_face_locations=boxes)
+        for enc in encodings:
+            matches = face_recognition.compare_faces(_known_encodings, enc, tolerance=TOLERANCE)
+            if any(matches):
+                return True
+        return False
+    finally:
+        cap.release()
+
+
+# ============================================================================
 # MAIN
 # ============================================================================
 
@@ -443,6 +492,7 @@ def main():
 
     cv2.namedWindow("THE MACHINE", cv2.WINDOW_NORMAL)
     cv2.resizeWindow("THE MACHINE", WINDOW_WIDTH, WINDOW_HEIGHT)
+    cv2.setWindowProperty("THE MACHINE", cv2.WND_PROP_TOPMOST, 1)
 
     frame_no = 0
     fps_clock = time.time()
