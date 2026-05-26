@@ -46,12 +46,12 @@ BRACKET_ARM = 24
 BRACKET_WEIGHT = 2
 BRACKET_MARGIN = 28
 
-# Face box style (segmented: solid corners + dashed edges + solid midpoint)
+# Face box style (segmented: solid corners + dashed edges + perpendicular centre tick)
 CORNER_LEN = 20                      # Length of each solid corner arm (px)
-MID_SOLID_HALF = 6                   # Half-length of centre solid tick (12 px total)
+TICK_HALF = 6                        # Half-length of centre cross-tick (12 px total)
 DASH_LEN = 8                         # Dash segment length (px)
 GAP_LEN = 8                          # Gap between dashes (px)
-DASH_COLOR = (0, 50, 60)             # Very dark yellow for dashed edges (BGR)
+DASH_COLOR = (0, 0, 0)               # Black for dashed edges
 BOX_WEIGHT = 2                       # Line thickness for face boxes
 
 # Typography
@@ -286,37 +286,37 @@ def _draw_segmented_box(frame, left, top, right, bottom):
     cv2.line(frame, (l, b - cl), (l, b), HUD_COLOR, BOX_WEIGHT)
     cv2.line(frame, (l, b), (l + cl, b), HUD_COLOR, BOX_WEIGHT)
 
-    # --- dashed edges with solid centre tick ---
+    # --- dashed edges with perpendicular centre tick ---
     mx = (l + r) // 2                                      # horizontal midpoint
     my = (t + b) // 2                                      # vertical midpoint
-    mh = MID_SOLID_HALF
+    th = TICK_HALF
 
-    # Top edge:  corner ─┄┄ dashes ┄┄ ─ solid ─ ┄┄ dashes ┄┄─ corner
-    _draw_dashed_line(frame, (l + cl, t), (mx - mh, t),
+    # Top edge:  corner ─┄┄ dashes ┄┄ ─|─ ┄┄ dashes ┄┄─ corner
+    _draw_dashed_line(frame, (l + cl, t), (mx, t),
                       DASH_COLOR, BOX_WEIGHT, DASH_LEN, GAP_LEN)
-    cv2.line(frame, (mx - mh, t), (mx + mh, t), HUD_COLOR, BOX_WEIGHT)
-    _draw_dashed_line(frame, (mx + mh, t), (r - cl, t),
+    cv2.line(frame, (mx, t - th), (mx, t + th), HUD_COLOR, BOX_WEIGHT)
+    _draw_dashed_line(frame, (mx, t), (r - cl, t),
                       DASH_COLOR, BOX_WEIGHT, DASH_LEN, GAP_LEN)
 
     # Right edge
-    _draw_dashed_line(frame, (r, t + cl), (r, my - mh),
+    _draw_dashed_line(frame, (r, t + cl), (r, my),
                       DASH_COLOR, BOX_WEIGHT, DASH_LEN, GAP_LEN)
-    cv2.line(frame, (r, my - mh), (r, my + mh), HUD_COLOR, BOX_WEIGHT)
-    _draw_dashed_line(frame, (r, my + mh), (r, b - cl),
+    cv2.line(frame, (r - th, my), (r + th, my), HUD_COLOR, BOX_WEIGHT)
+    _draw_dashed_line(frame, (r, my), (r, b - cl),
                       DASH_COLOR, BOX_WEIGHT, DASH_LEN, GAP_LEN)
 
     # Bottom edge
-    _draw_dashed_line(frame, (r - cl, b), (mx + mh, b),
+    _draw_dashed_line(frame, (r - cl, b), (mx, b),
                       DASH_COLOR, BOX_WEIGHT, DASH_LEN, GAP_LEN)
-    cv2.line(frame, (mx + mh, b), (mx - mh, b), HUD_COLOR, BOX_WEIGHT)
-    _draw_dashed_line(frame, (mx - mh, b), (l + cl, b),
+    cv2.line(frame, (mx, b - th), (mx, b + th), HUD_COLOR, BOX_WEIGHT)
+    _draw_dashed_line(frame, (mx, b), (l + cl, b),
                       DASH_COLOR, BOX_WEIGHT, DASH_LEN, GAP_LEN)
 
     # Left edge
-    _draw_dashed_line(frame, (l, b - cl), (l, my + mh),
+    _draw_dashed_line(frame, (l, b - cl), (l, my),
                       DASH_COLOR, BOX_WEIGHT, DASH_LEN, GAP_LEN)
-    cv2.line(frame, (l, my + mh), (l, my - mh), HUD_COLOR, BOX_WEIGHT)
-    _draw_dashed_line(frame, (l, my - mh), (l, t + cl),
+    cv2.line(frame, (l - th, my), (l + th, my), HUD_COLOR, BOX_WEIGHT)
+    _draw_dashed_line(frame, (l, my), (l, t + cl),
                       DASH_COLOR, BOX_WEIGHT, DASH_LEN, GAP_LEN)
 
 
