@@ -453,6 +453,22 @@ def open_camera():
 
     return cap
 
+def _crop_centre_to_aspect(frame, target_w, target_h):
+    """Centre-crop *frame* to match target aspect ratio, avoiding stretch."""
+    h, w = frame.shape[:2]
+    target_ratio = target_w / target_h
+    src_ratio = w / h
+    if src_ratio > target_ratio:
+        new_w = int(h * target_ratio)
+        offset = (w - new_w) // 2
+        frame = frame[:, offset:offset + new_w]
+    elif src_ratio < target_ratio:
+        new_h = int(w / target_ratio)
+        offset = (h - new_h) // 2
+        frame = frame[offset:offset + new_h, :]
+    return frame
+
+
 # ============================================================================
 # ONE-SHOT IDENTITY CHECK  (for external callers, e.g. Daily companion)
 # ============================================================================
@@ -545,6 +561,7 @@ def run_hud_scan(duration_seconds: float = 10.0,
 
         if MIRROR_MODE:
             frame = cv2.flip(frame, 1)
+        frame = _crop_centre_to_aspect(frame, WINDOW_WIDTH, WINDOW_HEIGHT)
         frame = cv2.resize(frame, (WINDOW_WIDTH, WINDOW_HEIGHT))
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
@@ -619,6 +636,7 @@ def main():
 
         if MIRROR_MODE:
             frame = cv2.flip(frame, 1)
+        frame = _crop_centre_to_aspect(frame, WINDOW_WIDTH, WINDOW_HEIGHT)
         frame = cv2.resize(frame, (WINDOW_WIDTH, WINDOW_HEIGHT))
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
