@@ -1,0 +1,1 @@
+- [Voice notifications](feedback_voice_notifications.md) — call VoiceLine MCP at end of every turn for spoken task-completion alerts
