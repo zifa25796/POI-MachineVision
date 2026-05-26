@@ -23,7 +23,7 @@ import time
 # CONFIGURABLE PARAMETERS
 # ============================================================================
 
-KNOWN_FACES_DIR = "known_faces"
+KNOWN_FACES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "known_faces")
 TOLERANCE = 0.5                       # Face match tolerance (0 = strict, 1 = loose)
 RECOGNITION_INTERVAL = 30             # Re-confirm identity every N frames per tracked face
 PROCESS_SCALE = 0.25                  # Downscale factor for detection (0.25 = 1/4 size)
@@ -473,7 +473,7 @@ def _crop_centre_to_aspect(frame, target_w, target_h):
 # ONE-SHOT IDENTITY CHECK  (for external callers, e.g. Daily companion)
 # ============================================================================
 
-def quick_identity_check(known_faces_dir: str | None = None,
+def quick_identity_check(known_faces_dir=None,
                          camera_index: int = 0,
                          capture_warmup: int = 15) -> bool:
     """Open camera, take a frame, check if ADMIN is visible. Returns True/False."""
@@ -518,10 +518,13 @@ def quick_identity_check(known_faces_dir: str | None = None,
         cap.release()
 
 
-def run_hud_scan(duration_seconds: float = 10.0,
-                 known_faces_dir: str | None = None,
-                 camera_index: int = 0) -> bool:
+def run_hud_scan(duration_seconds: float = 5.0,
+                 known_faces_dir=None,
+                 camera_index: int = 0,
+                 on_admin=None,
+                 voice_delay: float = 1.0) -> bool:
     """Launch the full Machine HUD window for *duration_seconds*.
+    Calls *on_admin* after *voice_delay* seconds from first ADMIN detection.
     Returns True if ADMIN was detected at any point during the scan."""
 
     global _tracked_faces, _next_face_id, _known_encodings
@@ -538,6 +541,7 @@ def run_hud_scan(duration_seconds: float = 10.0,
         return False
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, CAMERA_WIDTH)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAMERA_HEIGHT)
+    cap.set(cv2.CAP_PROP_AUTOFOCUS, 1)
 
     for _ in range(WARMUP_FRAMES):
         cap.read()
@@ -553,6 +557,8 @@ def run_hud_scan(duration_seconds: float = 10.0,
     fps_clock = time.time()
     start_time = time.time()
     admin_seen = False
+    admin_first_at = None
+    admin_notified = False
 
     while True:
         ok, frame = cap.read()
@@ -561,7 +567,7 @@ def run_hud_scan(duration_seconds: float = 10.0,
 
         if MIRROR_MODE:
             frame = cv2.flip(frame, 1)
-        frame = _crop_centre_to_aspect(frame, WINDOW_WIDTH, WINDOW_HEIGHT)
+        frame = _crop_centre_to_aspect(frame, WINDOW_WIDTH, WINDOW_HEIGHT).copy()
         frame = cv2.resize(frame, (WINDOW_WIDTH, WINDOW_HEIGHT))
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
@@ -572,7 +578,18 @@ def run_hud_scan(duration_seconds: float = 10.0,
 
         for data in tracked.values():
             if data.get("name") == "ADMIN":
+                if not admin_seen:
+                    admin_first_at = time.time()
                 admin_seen = True
+
+        # fire callback 1s after first ADMIN detection
+        if (on_admin is not None
+                and admin_seen
+                and not admin_notified
+                and admin_first_at is not None
+                and time.time() - admin_first_at >= voice_delay):
+            on_admin()
+            admin_notified = True
 
         draw_hud(frame, tracked)
 
@@ -595,7 +612,7 @@ def run_hud_scan(duration_seconds: float = 10.0,
         frame_no += 1
 
     cap.release()
-    cv2.destroyWindow("THE MACHINE")
+    cv2.destroyAllWindows()
     return admin_seen
 
 
