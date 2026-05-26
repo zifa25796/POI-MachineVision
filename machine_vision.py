@@ -15,6 +15,7 @@ import numpy as np
 import face_recognition
 from datetime import datetime
 import os
+import pickle
 import sys
 import time
 
@@ -33,7 +34,7 @@ WINDOW_WIDTH = 720
 WINDOW_HEIGHT = 720
 CAMERA_WIDTH = 1280                   # Native capture resolution
 CAMERA_HEIGHT = 720
-WARMUP_FRAMES = 30                    # Discard N frames while AE / AWB / AF settle
+WARMUP_FRAMES = 10                    # Discard N frames while AE / AWB / AF settle
 
 # HUD palette  (BGR byte order -- #FFD700 = (0, 215, 255))
 HUD_COLOR = (0, 215, 255)
@@ -79,7 +80,7 @@ _next_face_id = 0
 # ============================================================================
 
 def load_known_faces(directory):
-    """Scan *directory* for images, extract face encodings. Exits on failure."""
+    """Scan *directory* for images, extract face encodings.  Uses pickle cache."""
     global _known_encodings
 
     if not os.path.isdir(directory):
@@ -87,12 +88,34 @@ def load_known_faces(directory):
         print("Create a 'known_faces/' folder and put your photos inside (jpg / png).")
         sys.exit(1)
 
-    files = [f for f in os.listdir(directory)
-             if f.lower().endswith(('.jpg', '.jpeg', '.png'))]
+    files = sorted(f for f in os.listdir(directory)
+                   if f.lower().endswith(('.jpg', '.jpeg', '.png')))
     if not files:
         print(f"[ERROR]  No images in '{directory}/'.")
         sys.exit(1)
 
+    cache_path = os.path.join(directory, ".encodings_cache.pkl")
+
+    # Check if cache is fresh (same files, same mtimes)
+    cache_valid = False
+    if os.path.exists(cache_path):
+        try:
+            with open(cache_path, "rb") as fh:
+                cache = pickle.load(fh)
+            cached_sig = cache.get("sig", [])
+            cur_sig = sorted((fn, os.path.getmtime(os.path.join(directory, fn)))
+                             for fn in files)
+            if cached_sig == cur_sig:
+                _known_encodings = cache["encodings"]
+                cache_valid = True
+        except Exception:
+            pass
+
+    if cache_valid:
+        print(f"  -> {len(_known_encodings)} encoding(s) loaded from cache.")
+        return
+
+    # Compute encodings from scratch
     encodings = []
     for fn in files:
         path = os.path.join(directory, fn)
@@ -108,7 +131,16 @@ def load_known_faces(directory):
         print("[ERROR]  No faces found in any of the provided images.")
         sys.exit(1)
 
-    print(f"  -> {len(encodings)} encoding(s) loaded for ADMIN.")
+    # Save cache
+    try:
+        sig = sorted((fn, os.path.getmtime(os.path.join(directory, fn)))
+                     for fn in files)
+        with open(cache_path, "wb") as fh:
+            pickle.dump({"sig": sig, "encodings": encodings}, fh)
+    except Exception:
+        pass
+
+    print(f"  -> {len(encodings)} encoding(s) computed and cached for ADMIN.")
     _known_encodings = encodings
 
 # ============================================================================
@@ -468,6 +500,86 @@ def quick_identity_check(known_faces_dir: str | None = None,
         return False
     finally:
         cap.release()
+
+
+def run_hud_scan(duration_seconds: float = 10.0,
+                 known_faces_dir: str | None = None,
+                 camera_index: int = 0) -> bool:
+    """Launch the full Machine HUD window for *duration_seconds*.
+    Returns True if ADMIN was detected at any point during the scan."""
+
+    global _tracked_faces, _next_face_id, _known_encodings
+
+    directory = known_faces_dir or KNOWN_FACES_DIR
+    if _known_encodings is None:
+        if not os.path.isdir(directory):
+            return False
+        load_known_faces(directory)
+
+    cap = cv2.VideoCapture(camera_index)
+    if not cap.isOpened():
+        print("[ERROR]  Cannot access camera.")
+        return False
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, CAMERA_WIDTH)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAMERA_HEIGHT)
+
+    for _ in range(WARMUP_FRAMES):
+        cap.read()
+
+    cv2.namedWindow("THE MACHINE", cv2.WINDOW_NORMAL)
+    cv2.resizeWindow("THE MACHINE", WINDOW_WIDTH, WINDOW_HEIGHT)
+    cv2.setWindowProperty("THE MACHINE", cv2.WND_PROP_TOPMOST, 1)
+
+    _tracked_faces = {}
+    _next_face_id = 0
+
+    frame_no = 0
+    fps_clock = time.time()
+    start_time = time.time()
+    admin_seen = False
+
+    while True:
+        ok, frame = cap.read()
+        if not ok:
+            break
+
+        if MIRROR_MODE:
+            frame = cv2.flip(frame, 1)
+        frame = cv2.resize(frame, (WINDOW_WIDTH, WINDOW_HEIGHT))
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+        small = cv2.resize(rgb, (0, 0), fx=PROCESS_SCALE, fy=PROCESS_SCALE)
+        boxes = detect_faces(small, PROCESS_SCALE)
+        tracked = update_tracker(boxes, frame_no)
+        run_recognition_on_faces(rgb, tracked, frame_no)
+
+        for data in tracked.values():
+            if data.get("name") == "ADMIN":
+                admin_seen = True
+
+        draw_hud(frame, tracked)
+
+        now_f = time.time()
+        fps = 1.0 / (now_f - fps_clock + 0.0001)
+        fps_clock = now_f
+        cv2.putText(frame, f"{fps:.0f} fps",
+                    (WINDOW_WIDTH - 90, 22), FONT, 0.4, HUD_COLOR, 1)
+
+        cv2.imshow("THE MACHINE", frame)
+
+        key = cv2.waitKey(1) & 0xFF
+        if key == ord("q"):
+            break
+        if cv2.getWindowProperty("THE MACHINE", cv2.WND_PROP_VISIBLE) < 1:
+            break
+        if time.time() - start_time >= duration_seconds:
+            break
+
+        frame_no += 1
+
+    cap.release()
+    cv2.destroyWindow("THE MACHINE")
+    return admin_seen
 
 
 # ============================================================================

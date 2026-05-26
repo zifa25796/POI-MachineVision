@@ -3,3 +3,4 @@ __pycache__/
 *.pyo
 .env
 .claude/
+known_faces/.encodings_cache.pkl
