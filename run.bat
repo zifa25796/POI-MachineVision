@@ -1,3 +1,4 @@
 @echo off
-C:\Users\zeke\AppData\Local\Programs\Python\Python310\python.exe machine_vision.py
+cd /d "%~dp0.."
+uv run python CameraView/machine_vision.py
 pause
