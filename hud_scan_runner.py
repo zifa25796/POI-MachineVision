@@ -4,9 +4,6 @@ Prints "ADMIN_FIRST" immediately on detection, then "ADMIN" or "NONE" at exit.
 """
 
 import sys
-import os
-
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from machine_vision import run_hud_scan
 
 
