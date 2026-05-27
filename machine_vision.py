@@ -530,14 +530,11 @@ def run_hud_scan(duration_seconds: float = 5.0,
     global _tracked_faces, _next_face_id, _known_encodings
 
     directory = known_faces_dir or KNOWN_FACES_DIR
-    if _known_encodings is None:
-        if not os.path.isdir(directory):
-            return False
-        load_known_faces(directory)
+    if not os.path.isdir(directory):
+        return False
 
     cap = cv2.VideoCapture(camera_index)
     if not cap.isOpened():
-        print("[ERROR]  Cannot access camera.")
         return False
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, CAMERA_WIDTH)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAMERA_HEIGHT)
@@ -549,6 +546,42 @@ def run_hud_scan(duration_seconds: float = 5.0,
     cv2.namedWindow("THE MACHINE", cv2.WINDOW_NORMAL)
     cv2.resizeWindow("THE MACHINE", WINDOW_WIDTH, WINDOW_HEIGHT)
     cv2.setWindowProperty("THE MACHINE", cv2.WND_PROP_TOPMOST, 1)
+    cv2.waitKey(1)  # ensure window is rendered
+
+    # Show camera feed while loading faces (avoids blank-window delay)
+    loading_start = time.time()
+    faces_loaded = _known_encodings is not None
+    while not faces_loaded:
+        ok, frame = cap.read()
+        if not ok:
+            break
+        if MIRROR_MODE:
+            frame = cv2.flip(frame, 1)
+        frame = _crop_centre_to_aspect(frame, WINDOW_WIDTH, WINDOW_HEIGHT).copy()
+        frame = cv2.resize(frame, (WINDOW_WIDTH, WINDOW_HEIGHT))
+        clr = (0, 215, 255) if int(time.time() * 2) % 2 else (0, 140, 180)
+        cv2.putText(frame, "INITIALIZING...", (220, WINDOW_HEIGHT // 2),
+                    FONT, 1.0, clr, 2)
+        cv2.imshow("THE MACHINE", frame)
+        if cv2.waitKey(1) & 0xFF == ord("q"):
+            cap.release()
+            cv2.destroyAllWindows()
+            return False
+        if cv2.getWindowProperty("THE MACHINE", cv2.WND_PROP_VISIBLE) < 1:
+            cap.release()
+            cv2.destroyAllWindows()
+            return False
+        if _known_encodings is not None:
+            faces_loaded = True
+        elif time.time() - loading_start > 0.5:
+            # Start loading without blocking the display thread
+            if not os.path.isdir(directory):
+                cap.release()
+                cv2.destroyAllWindows()
+                return False
+            load_known_faces(directory)
+        # Brief sleep to keep loading screen responsive
+        time.sleep(0.03)
 
     _tracked_faces = {}
     _next_face_id = 0
@@ -574,15 +607,14 @@ def run_hud_scan(duration_seconds: float = 5.0,
         small = cv2.resize(rgb, (0, 0), fx=PROCESS_SCALE, fy=PROCESS_SCALE)
         boxes = detect_faces(small, PROCESS_SCALE)
         tracked = update_tracker(boxes, frame_no)
-        run_recognition_on_faces(rgb, tracked, frame_no)
 
+        # Render FIRST then recognise — avoids video freeze during face encoding
         for data in tracked.values():
             if data.get("name") == "ADMIN":
                 if not admin_seen:
                     admin_first_at = time.time()
                 admin_seen = True
 
-        # fire callback 1s after first ADMIN detection
         if (on_admin is not None
                 and admin_seen
                 and not admin_notified
@@ -592,7 +624,6 @@ def run_hud_scan(duration_seconds: float = 5.0,
             admin_notified = True
 
         draw_hud(frame, tracked)
-
         now_f = time.time()
         fps = 1.0 / (now_f - fps_clock + 0.0001)
         fps_clock = now_f
@@ -600,6 +631,9 @@ def run_hud_scan(duration_seconds: float = 5.0,
                     (WINDOW_WIDTH - 90, 22), FONT, 0.4, HUD_COLOR, 1)
 
         cv2.imshow("THE MACHINE", frame)
+
+        # Recognition runs after imshow so the video never freezes
+        run_recognition_on_faces(rgb, tracked, frame_no)
 
         key = cv2.waitKey(1) & 0xFF
         if key == ord("q"):
@@ -665,8 +699,6 @@ def main():
         tracked = update_tracker(boxes, frame_no)
 
         # ---- on-demand recognition (full-res for accuracy) ----
-        run_recognition_on_faces(rgb, tracked, frame_no)
-
         # ---- render HUD ----
         draw_hud(frame, tracked)
 
@@ -678,6 +710,9 @@ def main():
                     (WINDOW_WIDTH - 90, 22), FONT, 0.4, HUD_COLOR, 1)
 
         cv2.imshow("THE MACHINE", frame)
+
+        # Recognition after imshow — video never freezes
+        run_recognition_on_faces(rgb, tracked, frame_no)
 
         # Quit on Q key or window close (X button)
         key = cv2.waitKey(1) & 0xFF
