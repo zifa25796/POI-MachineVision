@@ -4,3 +4,5 @@ __pycache__/
 .env
 .claude/
 known_faces/.encodings_cache.pkl
+build/
+dist/

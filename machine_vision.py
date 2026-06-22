@@ -23,7 +23,13 @@ import time
 # CONFIGURABLE PARAMETERS
 # ============================================================================
 
-KNOWN_FACES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "known_faces")
+def _app_dir():
+    """Directory containing the .exe (frozen) or this script (dev)."""
+    if getattr(sys, 'frozen', False):
+        return os.path.dirname(sys.executable)
+    return os.path.dirname(os.path.abspath(__file__))
+
+KNOWN_FACES_DIR = os.path.join(_app_dir(), "known_faces")
 TOLERANCE = 0.5                       # Face match tolerance (0 = strict, 1 = loose)
 RECOGNITION_INTERVAL = 30             # Re-confirm identity every N frames per tracked face
 PROCESS_SCALE = 0.25                  # Downscale factor for detection (0.25 = 1/4 size)
