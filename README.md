@@ -18,7 +18,7 @@ with a surveillance-style heads-up display inspired by *Person of Interest*'s
 - A webcam
 
 ```bash
-pip install face_recognition opencv-python numpy Pillow
+uv sync
 ```
 
 ## Setup
@@ -28,7 +28,7 @@ pip install face_recognition opencv-python numpy Pillow
 3. Run:
 
 ```bash
-python machine_vision.py
+uv run python machine_vision.py
 ```
 
 Or double-click `run.bat` on Windows.
@@ -57,7 +57,18 @@ All tunable parameters are at the top of `machine_vision.py`:
 ```
 CameraView/
 ├── machine_vision.py    # Main program
+├── hud_scan_runner.py   # One-shot subprocess adapter used by Daily
 ├── run.bat              # Windows launcher
 ├── known_faces/         # Your photos (not tracked in git)
-└── memory/              # Claude Code session memory
+└── pyproject.toml       # Standalone uv dependencies
 ```
+
+## Running inside POI
+
+From the POI root, use `uv run python CameraView/machine_vision.py`. `run.bat` selects the parent POI environment when `.gitmodules` is present; standalone checkouts use this project's environment. Python 3.10 is recommended for the native dependencies.
+
+Face photos and encoding caches are local files excluded from Git; only `known_faces/.gitkeep` is tracked. Build with PyInstaller from this directory using `pyinstaller pyinstaller.spec`.
+
+Daily launches `hud_scan_runner.py <duration_seconds>` with its own interpreter.
+The runner writes `ADMIN_FIRST` on first detection, then `ADMIN` or `NONE` at
+exit. These stdout lines are protocol messages, not formatted console logs.

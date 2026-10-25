@@ -6,3 +6,7 @@ __pycache__/
 known_faces/.encodings_cache.pkl
 build/
 dist/
+
+known_faces/*
+!known_faces/.gitkeep
+.venv/

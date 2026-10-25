@@ -1,4 +1,8 @@
 @echo off
-cd /d "%~dp0.."
-uv run python CameraView/machine_vision.py
-pause
+cd /d "%~dp0"
+if exist "..\.gitmodules" (
+    uv run --project .. python machine_vision.py
+) else (
+    uv run python machine_vision.py
+)
+if errorlevel 1 pause
